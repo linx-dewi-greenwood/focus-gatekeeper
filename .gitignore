@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+*.zip
+*.vsix
+*.log
+.env
+Thumbs.db
+desktop.ini

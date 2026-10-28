@@ -1,0 +1,55 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0; width: 340px; background: #fbfaf6; color: #1d2321;
+  font: 14px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+}
+main { padding: 16px 16px 14px; }
+h1 { font-size: 15px; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: #1f6f5c; }
+label.f { display: block; font-size: 12px; color: #6b6558; margin: 12px 0 5px; }
+input[type=text], input[type=number] {
+  width: 100%; border: 1px solid #d6d2c6; border-radius: 8px; padding: 8px 10px; font-size: 14px; background: #fff; color: #1d2321;
+}
+input:focus { outline: 2px solid #1f6f5c; outline-offset: -1px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid #d6d2c6; background: #fff; border-radius: 999px; padding: 4px 11px; font-size: 13px; cursor: pointer; color: #1d2321; }
+.chip.on { background: #1d2321; color: #fff; border-color: #1d2321; }
+.levels { display: grid; gap: 6px; }
+.level { display: flex; gap: 8px; align-items: flex-start; border: 1px solid #d6d2c6; border-radius: 8px; padding: 7px 9px; cursor: pointer; background: #fff; }
+.level.on { border-color: #1f6f5c; box-shadow: inset 0 0 0 1px #1f6f5c; }
+.level b { font-size: 13px; }
+.level span { display: block; font-size: 12px; color: #6b6558; }
+.btn { border: 1px solid #d6d2c6; background: #fff; color: #1d2321; border-radius: 8px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
+.btn:hover { border-color: #9c968a; }
+.btn.primary { background: #1f6f5c; border-color: #1f6f5c; color: #fff; }
+.btn.wide { width: 100%; margin-top: 14px; padding: 10px; font-size: 14px; }
+.btn[disabled] { opacity: .45; pointer-events: none; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.err { color: #b42318; font-size: 12px; margin-top: 8px; min-height: 1em; }
+.muted { color: #6b6558; font-size: 12px; }
+.stack { display: grid; gap: 6px; }
+.line { border-radius: 10px; padding: 9px 11px; background: #fff; border: 1px solid #d6d2c6; }
+.line.main { border-left: 4px solid #1f6f5c; }
+.line.detour { border-left: 4px solid #c2410c; margin-left: 10px; }
+.line.current { box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+.line .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: #6b6558; }
+.line .title { font-weight: 600; font-size: 14px; word-break: break-all; }
+.time { font-variant-numeric: tabular-nums; font-weight: 600; color: #1d2321; }
+.time.over { color: #c2410c; }
+.q { display: inline-block; font-size: 11px; padding: 0 7px; border-radius: 999px; color: #fff; }
+.q-IU { background: #b42318; } .q-UNI { background: #c2410c; } .q-INU { background: #1f6f5c; } .q-NUNI { background: #6b7280; }
+details { margin-top: 12px; border-top: 1px solid #ebe7dc; padding-top: 8px; }
+summary { cursor: pointer; font-size: 13px; color: #3d3a33; }
+ul.list { list-style: none; margin: 6px 0 0; padding: 0; }
+ul.list li { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 0; font-size: 13px; border-top: 1px solid #f1eee4; }
+ul.list li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ul.list li a { color: #1f6f5c; }
+.x { border: 0; background: none; color: #9c968a; cursor: pointer; font-size: 14px; padding: 0 4px; }
+.x:hover { color: #b42318; }
+.mini { border: 1px solid #d6d2c6; background: #fff; border-radius: 6px; font-size: 11px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }
+h1 .status { margin-left: auto; font-size: 11px; font-weight: 500; color: #6b6558; border: 1px solid #d6d2c6; border-radius: 999px; padding: 1px 8px; }
+h1 .status.on { color: #1f6f5c; border-color: #1f6f5c; }
+input.custom-min { width: 72px; text-align: center; border-radius: 999px; padding: 4px 10px; font-size: 13px; }
+input.custom-min.on { border-color: #1d2321; box-shadow: inset 0 0 0 1px #1d2321; }
+input.custom-min.bad, .hint.bad { border-color: #b42318; color: #b42318; }
+.hint { font-size: 12px; color: #1f6f5c; margin-top: 6px; }

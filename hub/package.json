@@ -1,0 +1,18 @@
+{
+  "name": "focus-hub",
+  "productName": "一事一毕中控",
+  "version": "0.1.0",
+  "description": "一事一毕 · 中控：检测前台应用切换，统筹浏览器扩展等适配器",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/core.test.js"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "electron": "44.9.3"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "一事一毕 · 注意力助手",
+  "version": "0.2.4",
+  "description": "守住当前这一件事：切换网页时问一句，突发情况登记为岔路，处理完带你回到主线。",
+  "permissions": ["tabs", "storage", "alarms", "scripting", "notifications"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "一事一毕",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "content_scripts": [
+    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ],
+  "commands": {
+    "log-detour": {
+      "suggested_key": { "default": "Alt+B" },
+      "description": "我被打断了：登记岔路"
+    }
+  }
+}
