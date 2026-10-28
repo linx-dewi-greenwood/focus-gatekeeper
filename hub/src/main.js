@@ -5,6 +5,10 @@ const path = require('path');
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, globalShortcut, nativeImage, net, shell } = require('electron');
 const { createCore } = require('./core');
 const { startWatcher } = require('./watcher');
+const { registerNativeHost } = require('./native-host');
+
+// --background：由浏览器扩展自动拉起时带上，启动后不弹出控制面板
+const BACKGROUND = process.argv.includes('--background');
 
 const ROOT = path.join(__dirname, '..');
 const ICON = path.join(ROOT, '..', 'extension', 'icons', 'icon48.png');
@@ -121,7 +125,7 @@ function refreshTray(s) {
     { label: '关闭当前卡片（Alt+Shift+B）', click: hideCards },
     { label: '打开日志', click: () => shell.openPath(logFile) },
     { type: 'separator' },
-    { label: `浏览器扩展：${core.status().extConnected ? '已连接' : '未连接'}`, enabled: false },
+    { label: `浏览器扩展：${core.status().browsers.length ? '已连接 ' + core.status().browsers.join('、') : '未连接'}`, enabled: false },
     { label: `前台窗口检测：${watcher?.supported ? '运行中' : '不支持此系统'}`, enabled: false },
     {
       label: '开机自动启动', type: 'checkbox', checked: login,
@@ -186,11 +190,13 @@ app.whenReady().then(() => {
   }, 5000);
 
   global.__focusHub = { core, panelWin, cardWin, badgeWin }; // 调试用：在开发者工具/测试脚本里可以访问
-  if (!process.env.FOCUS_HUB_HIDDEN) showPanel();
+  registerNativeHost({ hubDir: ROOT, dataDir: app.getPath('userData'), log }).catch(e => log('登记自动启动出错', e));
+  if (!process.env.FOCUS_HUB_HIDDEN && !BACKGROUND) showPanel();
+  if (BACKGROUND) log('由浏览器扩展自动启动');
   log('中控已启动，状态文件：', path.join(app.getPath('userData'), 'state.json'));
 });
 
-app.on('second-instance', () => showPanel());
+app.on('second-instance', (_e, argv) => { if (!argv.includes('--background')) showPanel(); });
 app.on('window-all-closed', e => e.preventDefault()); // 常驻托盘
 app.on('before-quit', () => { quitting = true; });
 app.on('will-quit', () => {

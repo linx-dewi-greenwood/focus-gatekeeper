@@ -46,11 +46,34 @@ async function load() {
 
 function render() {
   clearInterval(timer);
-  const status = window.__focusHub ? '中控' : (hubInfo.connected ? '已连接中控' : '单机模式');
+  const status = window.__focusHub ? '中控' : (hubInfo.connected ? '已连接中控' : '中控未运行');
   app.replaceChildren(h('h1', {}, h('span', { class: 'dot' }), '一事一毕',
     h('span', { class: 'status' + (window.__focusHub || hubInfo.connected ? ' on' : '') }, status)));
+  // 浏览器扩展里：中控是唯一的状态中心和时钟，中控没在运行时先把它启动起来
+  if (!window.__focusHub && !hubInfo.connected) { renderHubDown(); return; }
   if (state.focus) renderActive(); else renderStart();
   renderLists();
+}
+
+function renderHubDown() {
+  const err = h('div', { class: 'err' }, hubInfo.launchError || '');
+  const btn = h('button', {
+    class: 'btn primary wide', 'data-act': 'launch-hub', onclick: async () => {
+      btn.setAttribute('disabled', '');
+      btn.textContent = '正在启动中控…';
+      err.textContent = '';
+      const r = await send({ type: 'launchHub' });
+      if (r?.ok) { load(); return; }
+      err.textContent = r?.error || '中控没有启动';
+      btn.removeAttribute('disabled');
+      btn.textContent = '再试一次';
+    }
+  }, '启动中控');
+  app.append(
+    h('p', { class: 'muted', style: 'font-size:13px;margin:0' }, '计时和规则都在电脑上的“中控”里，扩展只负责浏览器里的提醒。中控没在运行，先把它启动起来。'),
+    btn, err,
+    h('p', { class: 'muted', style: 'margin-top:12px' }, '第一次使用：在电脑上双击一次 Focus 文件夹里的“启动中控.bat”。中控会自动完成登记，以后扩展就能自己启动它。')
+  );
 }
 
 /* ---------- 开一件事 ---------- */

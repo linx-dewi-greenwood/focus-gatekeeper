@@ -15,7 +15,7 @@
 Focus\
 ├─ extension\          浏览器扩展 v0.2.1（Chrome / Edge，Manifest V3）
 │  ├─ engine.js        规则引擎：主线、岔路栈、四象限、置换额度、计时、切换分类（扩展和中控共用）
-│  ├─ background.js    浏览器适配器：标签页切换检测、连接中控、单机模式
+│  ├─ background.js    浏览器适配器：标签页切换检测、连接中控、中控没开时自动启动它
 │  ├─ content.js       网页里的卡片和角标（中控的卡片/角标窗口也直接加载它）
 │  ├─ popup.*          扩展弹窗（中控的控制面板也直接加载它）
 │  └─ manifest.json、icons\
@@ -35,7 +35,7 @@ Focus\
 
 ## 已定的设计决定
 
-- 中控是唯一状态中心；扩展连上 `ws://127.0.0.1:47321` 时把状态和计时交给中控，断开时退回单机。WebSocket 只接受 `chrome-extension://` 等扩展来源，拒绝网页。
+- 中控是唯一状态中心和唯一时钟（v0.3 起）；扩展不保存状态、不计时，只通过 `ws://127.0.0.1:47321` 上报和执行指令。中控没开时扩展用原生消息（`com.focus_gatekeeper.hub` → `hub\native-host.bat`）启动它；中控每次启动自动登记。扩展 ID 由 manifest `key` 固定为 `jkoppfcpiceehbfcbloeggopnieekhoo`。Chrome、Edge 可同时连接，卡片发给前台的那个浏览器。WebSocket 只接受 `chrome-extension://` 等扩展来源，拒绝网页。
 - 规则只写一份（`extension/engine.js`），中控用 `require('../../extension/engine.js')` 引用。
 - 前台窗口检测不用原生 npm 模块，用 `powershell.exe -EncodedCommand` 跑内嵌 C#，避免用户装编译工具。
 - 窗口标题不保存，只存进程名和域名；数据只在本机（中控状态 `%APPDATA%\focus-hub\state.json`）。
@@ -48,7 +48,7 @@ Focus\
 - **Electron 版本**：锁定 44.5.0，`npm install` 报 2 个 high 漏洞，应升到 44.x 最新补丁版。
 - **只有中控核心有自动测试**：引擎没有独立单测；扩展的端到端测试（Playwright）只在开发环境里跑过，没放进仓库。
 - **没有打包**：中控靠 `npm start` 运行；扩展靠“加载已解压”。发布需要 electron-builder 之类和扩展 zip。
-- **单一浏览器连接**：Chrome 和 Edge 同时装扩展时只认最后连上的一个。
+- ~~单一浏览器连接~~：v0.3 已支持多个浏览器同时连接。
 - **状态模型**：所有状态在一个 JSON 对象里（engine 的 `DEFAULT_STATE`），历史最多 30 条；设计文档里的“数据模型”一节是早期设想的表结构，与现状不一致，需要更新其一。
 - **待用户在 Windows 上验证**：“返回”时最小化分心窗口并切回原窗口。v0.1 用过 `AttachThreadInput`，在真机上把 VS Code 和 Claude 一起冻住了；已改为不阻塞的 `ShowWindowAsync` + 模拟 Alt 键 + `SetForegroundWindow`（失败时 `SwitchToThisWindow`），每条命令单独开线程，还需真机确认。
 - **冻结 bug 的真正原因（已修）**：卡片上的“关闭/好，继续/知道了”按钮写成 `onclick: clearCard`，点击事件被当成 `silent` 参数，中控卡片窗口没被隐藏，留下一层透明、置顶、全屏的窗口挡住其他程序。已修复，并且卡片窗口改为只和卡片一样大，主进程每 1.5 秒检查可见窗口里有没有卡片。

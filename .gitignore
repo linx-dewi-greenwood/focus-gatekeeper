@@ -7,3 +7,7 @@ out/
 .env
 Thumbs.db
 desktop.ini
+
+# 个人待办，不上传
+docs/todo.md
+docs/images/todo/

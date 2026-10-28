@@ -5,22 +5,27 @@
 
 ```
 Focus\
-├─ extension\   浏览器扩展（Chrome / Edge），v0.2.4
-├─ hub\         中控（Electron 桌面程序），v0.1.0
+├─ extension\   浏览器扩展（Chrome / Edge），v0.3.0
+├─ hub\         中控（Electron 桌面程序），v0.2.0
 └─ README.md
 ```
 
-- **中控**常驻在托盘，是唯一的状态中心。它读取 Windows 的前台窗口，所以切到 Word、微信、PDF 阅读器等任何应用都能管到。
-- **浏览器扩展**负责网页：上报网站、在网页里弹卡片。中控开着时自动连上（`ws://127.0.0.1:47321`），中控没开时单机运行。
-- 两边共用同一份规则：`extension\engine.js`。
+- **中控**常驻在托盘，是唯一的“大脑”：主线、岔路、四象限、计时都只在中控里，**只有一个时钟**。
+  它读取 Windows 的前台窗口，所以切到 Word、微信、PDF 阅读器等任何应用都能管到。
+- **浏览器扩展**只负责浏览器：检测网站切换并上报中控、按中控的指令在网页里弹卡片和切换标签页。
+  扩展通过 `ws://127.0.0.1:47321` 连接中控；**中控没开时，扩展会自动把它启动起来**（原生消息，见下）。
+  Chrome 和 Edge 可以同时装、同时连，看到的是同一条主线。
+- 判断规则写在 `extension\engine.js`，中控引用这一份。
 
 ## 安装
 
 ### 1. 浏览器扩展
 
 1. 打开 `chrome://extensions`（Edge 为 `edge://extensions`），打开右上角 **开发者模式**
-2. 点 **加载已解压的扩展程序**，选择仓库里的 `extension` 文件夹
+2. 点 **加载已解压的扩展程序**，选择仓库里的 **`extension`** 文件夹（不是仓库根目录）
 3. 已经打开的网页刷新一次
+
+扩展的 ID 固定为 `jkoppfcpiceehbfcbloeggopnieekhoo`（由 `manifest.json` 里的 `key` 决定，Chrome 和 Edge 里一样）。
 
 ### 2. 中控（需要 Node.js）
 
@@ -38,6 +43,14 @@ npm start
 
 启动后会打开控制面板，右下角任务栏托盘里有图标。关掉面板窗口中控仍在运行；退出请在托盘图标右键 → 退出中控。
 托盘菜单里可以勾选“开机自动启动”。
+
+### 3. 让扩展能自动启动中控（自动完成）
+
+**手动启动过一次中控就行。** 中控每次启动都会向 Chrome / Edge 登记一个“原生消息主机”（`hub\native-host.bat`），
+只写当前用户的注册表（`HKCU\Software\Google\Chrome\NativeMessagingHosts\com.focus_gatekeeper.hub` 和 Edge 对应的位置），不需要管理员权限。
+之后浏览器启动、你点扩展弹窗里的“启动中控”、或者做事做到一半中控被关掉时，扩展都会把中控在后台拉起来。
+
+如果移动了 Focus 文件夹，再手动启动一次中控，登记会自动更新。
 
 ## 怎么用
 
@@ -110,11 +123,12 @@ npm test
 
 | 文件 | 作用 |
 | --- | --- |
-| `extension\engine.js` | 规则引擎：主线、岔路栈、四象限、置换额度、计时（扩展和中控共用） |
-| `extension\background.js` | 浏览器适配器：标签页切换检测、连接中控、单机模式 |
+| `extension\engine.js` | 规则引擎：主线、岔路栈、四象限、置换额度、计时（由中控运行；扩展只用其中的判断函数） |
+| `extension\background.js` | 浏览器适配器：标签页切换检测、连接中控、中控没开时自动启动它 |
 | `extension\content.js` | 卡片和角标界面（网页里用；中控的卡片窗口和角标窗口也直接用它） |
 | `extension\popup.*` | 扩展弹窗（中控的控制面板也直接用它） |
-| `hub\src\main.js` | 中控主进程：窗口、托盘、Alt+B、断网检测 |
+| `hub\src\main.js` | 中控主进程：窗口、托盘、Alt+B、断网检测、登记自动启动 |
+| `hub\src\native-host.js`、`launcher.js`、`hub\native-host.bat` | 让浏览器扩展能启动中控（原生消息） |
 | `hub\src\core.js` | 中控核心：状态文件、计时、应用切换判断、与扩展通信 |
 | `hub\src\watcher.js`、`fgwatch.ps1` | 前台窗口检测（PowerShell 内嵌 C#，调用 Win32 `GetForegroundWindow`） |
 | `hub\ui\*` | 中控窗口页面；`shim.js` 让扩展的界面代码在中控里运行 |
@@ -123,7 +137,7 @@ npm test
 ## 已知限制
 
 - 前台窗口检测只支持 Windows。
-- 同时只连一个浏览器（Chrome 和 Edge 都装了扩展时，后连上的那个生效）。
+- 扩展离不开中控：中控没法启动时（比如还没手动启动过一次），扩展只提示，不会自己计时。
 - UWP 应用（如“设置”、“照片”）显示为同一个进程，暂时分不开。
 - 全屏游戏或演示时，置顶卡片可能被盖住。
 - 部分杀毒软件可能拦截 PowerShell 里的窗口切换调用；被拦时提问照常，只是“返回”不会自动切回应用。

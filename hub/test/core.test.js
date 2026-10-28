@@ -133,7 +133,7 @@ async function step(name, fn) {
     }
   });
   await new Promise(r => ext.on('open', r));
-  ext.send(JSON.stringify({ type: 'hello', role: 'browser', version: 'test', state: null }));
+  ext.send(JSON.stringify({ type: 'hello', role: 'browser', browser: 'chrome', version: 'test' }));
   await sleep(100);
   let seq = 0;
   const rpc = (method, ...args) => new Promise(resolve => {
@@ -261,6 +261,41 @@ async function step(name, fn) {
     const raw = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
     assert.strictEqual(raw.focus.title, '写文献综述');
     assert.ok(!JSON.stringify(raw).includes('报告.docx'), '不应保存窗口标题');
+  });
+
+  await step('Chrome 和 Edge 同时连接：状态同步给两边，卡片只发给在前台的那个浏览器', async () => {
+    const edge = new WebSocket('ws://127.0.0.1:47399', { origin: 'chrome-extension://abc' });
+    const edgeCmds = [], edgeStates = [];
+    edge.on('message', raw => {
+      const m = JSON.parse(raw);
+      if (m.type === 'state') edgeStates.push(m.state);
+      if (m.type === 'cmd') {
+        edgeCmds.push(m);
+        const result = m.cmd === 'activeTab' ? { kind: 'tab', tabId: 99, host: 'bing.com', url: 'https://bing.com/', title: 'Bing' } : true;
+        edge.send(JSON.stringify({ type: 'reply', id: m.id, result }));
+      }
+    });
+    await new Promise(r => edge.on('open', r));
+    edge.send(JSON.stringify({ type: 'hello', role: 'browser', browser: 'msedge', version: 'test' }));
+    await sleep(150);
+    assert.deepStrictEqual(core.status().browsers.sort(), ['chrome', 'msedge']);
+    assert.ok(edgeStates.length >= 1, 'Edge 连上后应收到状态');
+    // Edge 在前台 → 登记表发给 Edge，不发给 Chrome
+    tabCmds = [];
+    win('msedge', 31, 'Bing - Microsoft Edge'); await sleep(50);
+    await core.handleUi({ type: 'openDetourForm' });
+    const toEdge = edgeCmds.find(c => c.cmd === 'show');
+    assert.strictEqual(toEdge?.card?.kind, 'detour-form');
+    assert.strictEqual(toEdge.card.returnPlace.browser, 'msedge');
+    assert.ok(!tabCmds.some(c => c.cmd === 'show'), 'Chrome 不应收到卡片');
+    // 状态变化两边都收到（只有一个时钟、一条主线）
+    const before = edgeStates.length;
+    await core.handleUi({ type: 'pause' });
+    await sleep(100);
+    assert.ok(edgeStates.length > before);
+    edge.close();
+    await sleep(100);
+    assert.deepStrictEqual(core.status().browsers, ['chrome']);
   });
 
   ext.close();

@@ -1,34 +1,37 @@
 // 一事一毕 · 浏览器适配器（Manifest V3 service worker）
-// 规则在 engine.js。这里只负责标签页：检测切换、显示卡片、后退/关闭/切回标签页。
-// 连上中控（ws://127.0.0.1:47321）时，状态和计时都交给中控；中控没开时用本地引擎单机运行。
-importScripts('engine.js');
+// 中控是唯一的“大脑”：主线、岔路、四象限、计时都只在中控里，只有一个时钟。
+// 扩展只负责浏览器：检测网站/标签页切换并上报中控，按中控的指令在网页里显示卡片、切换标签页。
+// 中控没在运行时，通过原生消息（hub\native-host.bat）把它启动起来。
+importScripts('engine.js'); // 只用里面的纯函数（判断网站是否属于当前线等），不在扩展里保存状态或计时
 const E = self.FocusEngine;
 const HUB_URL = 'ws://127.0.0.1:47321';
+const NATIVE_HOST = 'com.focus_gatekeeper.hub';
 const now = () => Date.now();
 
-/* ---------------- 本地引擎（单机模式） ---------------- */
-const local = E.createEngine({
-  load: async () => (await chrome.storage.local.get('fs')).fs,
-  save: async s => { await chrome.storage.local.set({ fs: s }); refreshBadge(s); },
-  schedule: (name, when) => { if (!hub.ok) chrome.alarms.create(name, { when }); },
-  clear: name => chrome.alarms.clear(name),
-  show: (card, place) => showAt(place, card),
-  switchTo: place => switchToPlace(place)
-});
+// 告诉中控“我是哪个浏览器”，中控据此把卡片发给在前台的那个浏览器（进程名：chrome / msedge …）
+const BROWSER = (() => {
+  const brands = (navigator.userAgentData?.brands || []).map(b => b.brand.toLowerCase()).join(' ');
+  const ua = navigator.userAgent || '';
+  if (brands.includes('edge') || /Edg\//.test(ua)) return 'msedge';
+  if (brands.includes('brave')) return 'brave';
+  if (brands.includes('opera') || /OPR\//.test(ua)) return 'opera';
+  if (brands.includes('vivaldi')) return 'vivaldi';
+  return 'chrome';
+})();
 
 /* ---------------- 中控连接 ---------------- */
-const hub = { ws: null, ok: false, seq: 0, waiting: new Map() };
+const hub = { ws: null, ok: false, seq: 0, waiting: new Map(), readyWaiters: [], lastLaunch: 0, launchError: null };
+
 function connectHub() {
   if (hub.ws && (hub.ws.readyState === WebSocket.CONNECTING || hub.ws.readyState === WebSocket.OPEN)) return;
   let ws;
   try { ws = new WebSocket(HUB_URL); } catch { return; }
   hub.ws = ws;
-  ws.onopen = async () => {
+  ws.onopen = () => {
     hub.ok = true;
-    const all = await chrome.alarms.getAll(); // 计时交给中控
-    await Promise.all(all.filter(a => a.name === 'focus' || a.name.startsWith('detour:')).map(a => chrome.alarms.clear(a.name)));
-    const { fs } = await chrome.storage.local.get('fs');
-    ws.send(JSON.stringify({ type: 'hello', role: 'browser', version: chrome.runtime.getManifest().version, state: fs || null }));
+    hub.launchError = null;
+    ws.send(JSON.stringify({ type: 'hello', role: 'browser', browser: BROWSER, version: chrome.runtime.getManifest().version }));
+    hub.readyWaiters.splice(0).forEach(f => f(true));
   };
   ws.onmessage = ev => onHubMessage(ev.data);
   ws.onclose = () => {
@@ -37,13 +40,51 @@ function connectHub() {
     if (hub.ws === ws) hub.ws = null;
     for (const [, w] of hub.waiting) w.reject(new Error('中控已断开'));
     hub.waiting.clear();
-    if (was) local.resync(); // 退回单机：按现有状态重新计时
+    if (was) { // 中控关了：清掉网页里的角标（不显示过期的时间），下次有动作时再自动拉起中控
+      chrome.storage.local.set({ fs: null });
+      refreshBadge(null);
+    }
   };
   ws.onerror = () => {};
 }
-function hubCall(method, ...args) {
+
+function waitHub(ms) {
+  if (hub.ok) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const f = ok => { clearTimeout(t); resolve(ok); };
+    const t = setTimeout(() => { hub.readyWaiters = hub.readyWaiters.filter(x => x !== f); resolve(false); }, ms);
+    hub.readyWaiters.push(f);
+  });
+}
+
+// 确保中控在运行：先尝试连接；连不上就通过原生消息启动它（20 秒内最多启动一次），再等它就绪
+async function ensureHub({ wait = 15000 } = {}) {
+  if (hub.ok) return true;
+  connectHub();
+  if (await waitHub(800)) return true;
+  if (now() - hub.lastLaunch > 20000) {
+    hub.lastLaunch = now();
+    try {
+      const r = await chrome.runtime.sendNativeMessage(NATIVE_HOST, { cmd: 'launch' });
+      hub.launchError = r?.ok ? null : (r?.error || '中控没有启动');
+    } catch {
+      // 浏览器里还没有登记启动器（中控从没手动启动过）：不用再等了
+      hub.launchError = '没法自动启动中控：请先在电脑上双击一次“启动中控.bat”（中控会自动完成登记），之后扩展就能自动启动它';
+      connectHub();
+      return waitHub(1500);
+    }
+  }
+  const end = now() + wait;
+  while (now() < end) {
+    connectHub();
+    if (await waitHub(1000)) return true;
+  }
+  return hub.ok;
+}
+
+async function hubCall(method, ...args) {
+  if (!hub.ok && !(await ensureHub())) throw new Error(hub.launchError || '中控未运行');
   return new Promise((resolve, reject) => {
-    if (!hub.ok) return reject(new Error('中控未连接'));
     const id = ++hub.seq;
     hub.waiting.set(id, { resolve, reject });
     hub.ws.send(JSON.stringify({ type: 'rpc', id, method, args }));
@@ -52,15 +93,16 @@ function hubCall(method, ...args) {
     }, 15000);
   });
 }
-const remote = new Proxy({}, { get: (_, method) => (...args) => hubCall(method, ...args) });
-const engine = () => (hub.ok ? remote : local);
+// 所有规则调用都发给中控
+const engine = () => new Proxy({}, { get: (_, method) => (...args) => hubCall(method, ...args) });
 
 async function onHubMessage(data) {
   let msg;
   try { msg = JSON.parse(data); } catch { return; }
   if (msg.type === 'state') {
     await chrome.storage.local.set({ fs: msg.state });
-    refreshBadge(msg.state || {});
+    refreshBadge(msg.state);
+    const n = await N(); n.hadFocus = !!msg.state?.focus; await saveN();
   } else if (msg.type === 'reply') {
     const w = hub.waiting.get(msg.id);
     if (!w) return;
@@ -77,12 +119,20 @@ async function onHubMessage(data) {
   }
 }
 
+// 做事做到一半中控没了（比如被关掉）：用户一动浏览器就把它拉回来
+async function recoverIfNeeded() {
+  if (hub.ok) return;
+  connectHub();
+  const n = await N();
+  if (n.hadFocus) ensureHub().catch(() => {});
+}
+
 /* ---------------- 会话内的导航状态 ---------------- */
 let nav = null, navLoading = null;
 function N() {
   if (nav) return Promise.resolve(nav);
   navLoading ||= chrome.storage.session.get('nav').then(({ nav: saved }) => {
-    nav = Object.assign({ lastActiveTab: null, prevOf: {}, pending: {}, newTabs: [], tabHost: {}, asked: {}, suppress: {} }, saved || {});
+    nav = Object.assign({ lastActiveTab: null, prevOf: {}, pending: {}, newTabs: [], tabHost: {}, asked: {}, suppress: {}, hadFocus: false }, saved || {});
     return nav;
   });
   return navLoading;
@@ -107,7 +157,7 @@ function refreshBadge(s) {
 function tabPlace(tab) {
   if (!tab) return null;
   const url = tab.url || tab.pendingUrl || '';
-  return { kind: 'tab', tabId: tab.id, host: E.hostOf(url), url, title: tab.title || '' };
+  return { kind: 'tab', tabId: tab.id, host: E.hostOf(url), url, title: tab.title || '', browser: BROWSER };
 }
 async function activeTab() {
   const [t] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
@@ -178,7 +228,7 @@ async function evaluate(tabId, via, prevTabId, isNew = false) {
 }
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
-  connectHub();
+  recoverIfNeeded();
   const n = await N();
   const prev = n.lastActiveTab;
   if (prev === tabId) return;
@@ -219,7 +269,7 @@ chrome.tabs.onRemoved.addListener(async tabId => {
 
 chrome.windows.onFocusChanged.addListener(async wid => {
   if (wid === chrome.windows.WINDOW_ID_NONE) return;
-  connectHub();
+  recoverIfNeeded();
   const [t] = await chrome.tabs.query({ active: true, windowId: wid });
   if (!t) return;
   const n = await N();
@@ -269,7 +319,8 @@ async function decide(choice, tabId) {
 async function handle(msg, sender) {
   const tabId = sender.tab?.id ?? msg.tabId;
   switch (msg.type) {
-    case 'getState': return { state: await readState(), hub: { connected: hub.ok } };
+    case 'getState': return { state: hub.ok ? await readState() : null, hub: { connected: hub.ok, launchError: hub.launchError } };
+    case 'launchHub': return (await ensureHub()) ? { ok: true } : { error: hub.launchError || '中控没有启动' };
     case 'startFocus': {
       const tab = msg.form?.tabId != null ? await chrome.tabs.get(msg.form.tabId).catch(() => null) : await activeTab();
       const r = await engine().startFocus(msg.form, tabPlace(tab));
@@ -322,20 +373,24 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
 });
 
 chrome.alarms.onAlarm.addListener(async a => {
-  if (a.name === 'hub') return connectHub();
-  if (a.name === 'tick') return refreshBadge(await readState());
-  if (!hub.ok) return local.onAlarm(a.name); // 连着中控时计时由中控负责
+  if (a.name === 'hub') return recoverIfNeeded();
+  if (a.name === 'tick') return refreshBadge(hub.ok ? await readState() : null);
+  // 扩展不再自己计时：旧版留下的 focus / detour 计时器直接清掉
+  chrome.alarms.clear(a.name);
 });
 
 chrome.commands.onCommand.addListener(cmd => {
   if (cmd === 'log-detour') handle({ type: 'openDetourForm' }, {});
 });
 
-function boot() {
+async function boot() {
   chrome.alarms.create('hub', { periodInMinutes: 0.5 });
   chrome.alarms.create('tick', { periodInMinutes: 1 });
-  connectHub();
-  readState().then(s => refreshBadge(s));
+  const old = await chrome.alarms.getAll(); // 旧版（单机模式）的计时器
+  await Promise.all(old.filter(a => a.name === 'focus' || a.name.startsWith('detour:')).map(a => chrome.alarms.clear(a.name)));
+  await chrome.storage.local.set({ fs: null }); // 状态只以中控为准，连上后中控会发过来
+  refreshBadge(null);
+  ensureHub().catch(() => {}); // 浏览器启动时把中控也拉起来
 }
 chrome.runtime.onStartup.addListener(boot);
 chrome.runtime.onInstalled.addListener(boot);

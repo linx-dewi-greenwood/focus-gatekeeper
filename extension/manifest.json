@@ -1,23 +1,54 @@
 {
   "manifest_version": 3,
   "name": "一事一毕 · 注意力助手",
-  "version": "0.2.4",
-  "description": "守住当前这一件事：切换网页时问一句，突发情况登记为岔路，处理完带你回到主线。",
-  "permissions": ["tabs", "storage", "alarms", "scripting", "notifications"],
-  "host_permissions": ["<all_urls>"],
-  "background": { "service_worker": "background.js" },
+  "version": "0.3.0",
+  "description": "守住当前这一件事：切换网页时问一句，突发情况登记为岔路，处理完带你回到主线。需要配合电脑上的“中控”使用。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl5j5zOJvTehFsP5H7pZ22pML5naAd104R9fF3GlS7EZy020HHgn9XxWFw0nPPVMKYHmaJGEGpLfAfdhoAKwYwscQ/TdbgCo8CgdbU919+fzFzXCZwP0Irkth5n1QsMaKVTGuOM0BuTKDRgqiRvGNFmC1pqJLg3mPhoOjDkiUOv4V1NdtOeRXUOEJzba8Me7y3Z1YBm650sC8vxAKbOh88+qlmTncB7GetYPXrPc/CW5Se3CwXkrjNxZE6RidH8PeG9MkuDNYGegspe4U13HWPkojVOrrJ+fsUOIhoAIRsjkwlz/l/3gzPdIle65ZXlNDMf5JkM9kpqH43mK4laH89wIDAQAB",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms",
+    "scripting",
+    "notifications",
+    "nativeMessaging"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_title": "一事一毕",
-    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "content_scripts": [
-    { "matches": ["http://*/*", "https://*/*"], "js": ["content.js"], "run_at": "document_idle" }
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
   ],
   "commands": {
     "log-detour": {
-      "suggested_key": { "default": "Alt+B" },
+      "suggested_key": {
+        "default": "Alt+B"
+      },
       "description": "我被打断了：登记岔路"
     }
   }

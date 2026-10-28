@@ -26,7 +26,7 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   // activate: (place) → Promise<bool>                        把某个应用窗口切到前台
   // minimize: (place) → Promise<bool>                        把某个应用窗口最小化
   const timers = new Map();
-  let ext = null;            // 已连接的浏览器扩展 { ws, seq, waiting }
+  const exts = new Map();    // 已连接的浏览器扩展：ws → { ws, seq, waiting, browser }（Chrome、Edge 可以同时连）
   let fg = null;             // 当前前台窗口
   let lastFgHwnd = null;     // 上一个前台窗口（包括中控自己的卡片）
   let lastWork = null;       // 最近一个“用户在用的”窗口（不含中控自己和系统界面）
@@ -60,12 +60,18 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   }, engineOptions);
   function broadcast(s) {
     try { ui.pushState(s); } catch (e) { log('pushState', e); }
-    sendExt({ type: 'state', state: s });
+    for (const e of exts.values()) sendTo(e, { type: 'state', state: s });
   }
 
   /* ---------- 位置 ---------- */
   const appPlace = w => (w ? { kind: 'app', app: w.app, label: appLabel(w.app), hwnd: w.hwnd, pid: w.pid } : null);
   const isBrowser = w => !!w && E.BROWSER_APPS.includes(w.app);
+  // 找到某个浏览器（进程名，如 chrome / msedge）对应的扩展；只连了一个时就用那一个
+  function extFor(browser) {
+    const list = [...exts.values()];
+    if (!list.length) return null;
+    return list.find(e => e.browser === browser) || (list.length === 1 ? list[0] : null) || list.at(-1);
+  }
   function rememberRecent(w) {
     const i = recent.findIndex(r => r.app === w.app);
     if (i >= 0) recent.splice(i, 1);
@@ -75,9 +81,10 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   // 用户“正在工作的位置”：浏览器在前台且扩展已连接时取当前标签页，否则取应用窗口
   async function workPlace() {
     if (!lastWork) return null;
-    if (isBrowser(lastWork) && ext) {
-      const tab = await extCmd('activeTab', {}).catch(() => null);
-      if (tab) return { ...tab, app: lastWork.app };
+    const e = isBrowser(lastWork) && extFor(lastWork.app);
+    if (e) {
+      const tab = await extCmd(e, 'activeTab', {}).catch(() => null);
+      if (tab) return { ...tab, app: lastWork.app, browser: e.browser };
     }
     return appPlace(lastWork);
   }
@@ -85,9 +92,9 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   /* ---------- 卡片与切换 ---------- */
   async function show(card, place) {
     if (!card) return false;
-    const wantExt = ext && (place?.kind === 'tab' || (!place && isBrowser(lastWork)));
-    if (wantExt) {
-      const ok = await extCmd('show', { card, place }).catch(() => false);
+    const e = place?.kind === 'tab' ? extFor(place.browser) : (!place && isBrowser(lastWork) ? extFor(lastWork.app) : null);
+    if (e) {
+      const ok = await extCmd(e, 'show', { card, place }).catch(() => false);
       if (ok) return true;
     }
     return ui.showCard(card) !== false;
@@ -95,8 +102,9 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   async function switchTo(place) {
     if (!place) return false;
     if (place.kind === 'tab') {
-      if (!ext) return false;
-      const ok = await extCmd('switchTo', { place }).catch(() => false);
+      const e = extFor(place.browser);
+      if (!e) return false;
+      const ok = await extCmd(e, 'switchTo', { place }).catch(() => false);
       if (ok && browserWin && !isBrowser(fg)) { suppress[browserWin.app] = Date.now() + 1500; await activate(appPlace(browserWin)); }
       return !!ok;
     }
@@ -125,7 +133,7 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
 
   async function evaluateApp(win, prev) {
     if (!fg || fg.hwnd !== win.hwnd) return; // 已经又切走了
-    if (ext && isBrowser(win)) return;       // 浏览器里交给扩展按网站判断
+    if (isBrowser(win) && extFor(win.app)) return; // 浏览器里交给扩展按网站判断
     if (Date.now() < (suppress[win.app] || 0)) return;
     const s = await engine.getState();
     if (!s.focus) return;
@@ -169,7 +177,7 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
       case 'getState':
         return {
           state: await engine.getState(),
-          hub: { connected: !!ext, recentApps: recent.slice(), workApp: lastWork ? appLabel(lastWork.app) : null }
+          hub: { connected: exts.size > 0, browsers: [...exts.values()].map(e => e.browser), recentApps: recent.slice(), workApp: lastWork ? appLabel(lastWork.app) : null }
         };
       case 'startFocus': {
         const r = await engine.startFocus(msg.form || {}, await workPlace());
@@ -225,16 +233,16 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
   }
 
   /* ---------- 浏览器扩展（WebSocket） ---------- */
-  function sendExt(obj) {
-    if (ext && ext.ws.readyState === 1) ext.ws.send(JSON.stringify(obj));
+  function sendTo(e, obj) {
+    if (e && e.ws.readyState === 1) e.ws.send(JSON.stringify(obj));
   }
-  function extCmd(cmd, payload) {
+  function extCmd(e, cmd, payload) {
     return new Promise((resolve, reject) => {
-      if (!ext) return reject(new Error('浏览器扩展未连接'));
-      const id = ++ext.seq;
-      ext.waiting.set(id, { resolve, reject });
-      ext.ws.send(JSON.stringify({ type: 'cmd', id, cmd, ...payload }));
-      setTimeout(() => { if (ext?.waiting.has(id)) { ext.waiting.delete(id); reject(new Error('扩展没有响应')); } }, 5000);
+      if (!e || e.ws.readyState !== 1) return reject(new Error('浏览器扩展未连接'));
+      const id = ++e.seq;
+      e.waiting.set(id, { resolve, reject });
+      e.ws.send(JSON.stringify({ type: 'cmd', id, cmd, ...payload }));
+      setTimeout(() => { if (e.waiting.has(id)) { e.waiting.delete(id); reject(new Error('扩展没有响应')); } }, 5000);
     });
   }
   const wss = new WebSocketServer({
@@ -248,10 +256,11 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
       if (msg.type === 'hello') {
-        if (ext && ext.ws !== ws) try { ext.ws.close(); } catch {}
-        ext = { ws, seq: 0, waiting: new Map(), version: msg.version };
-        log('浏览器扩展已连接', msg.version || '');
-        await engine.adopt(msg.state);
+        const browser = E.normApp(msg.browser || 'chrome');
+        // 同一个浏览器重复连接（比如扩展重新加载）时，关掉旧的那条
+        for (const old of exts.values()) if (old.browser === browser && old.ws !== ws) { try { old.ws.close(); } catch {} exts.delete(old.ws); }
+        exts.set(ws, { ws, seq: 0, waiting: new Map(), version: msg.version, browser });
+        log('浏览器扩展已连接', browser, msg.version || '');
         ws.send(JSON.stringify({ type: 'state', state: await engine.getState() }));
       } else if (msg.type === 'rpc') {
         let result = null, error = null;
@@ -261,27 +270,29 @@ function createCore({ statePath, ui, activate, minimize = async () => false, por
           if (msg.method === 'startFocus' && result?.ok) asked.clear();
         } catch (e) { error = String(e?.message || e); }
         ws.send(JSON.stringify({ type: 'reply', id: msg.id, result, error }));
-      } else if (msg.type === 'reply' && ext?.ws === ws) {
-        const w = ext.waiting.get(msg.id);
+      } else if (msg.type === 'reply' && exts.has(ws)) {
+        const e = exts.get(ws);
+        const w = e.waiting.get(msg.id);
         if (!w) return;
-        ext.waiting.delete(msg.id);
+        e.waiting.delete(msg.id);
         if (msg.error) w.reject(new Error(msg.error)); else w.resolve(msg.result);
       }
     });
     ws.on('close', () => {
-      if (ext?.ws !== ws) return;
-      for (const [, w] of ext.waiting) w.reject(new Error('扩展已断开'));
-      ext = null;
-      log('浏览器扩展已断开');
+      const e = exts.get(ws);
+      if (!e) return;
+      for (const [, w] of e.waiting) w.reject(new Error('扩展已断开'));
+      exts.delete(ws);
+      log('浏览器扩展已断开', e.browser);
     });
   });
-  const ping = setInterval(() => sendExt({ type: 'ping' }), 20000); // 保持扩展的 service worker 不休眠
+  const ping = setInterval(() => { for (const e of exts.values()) sendTo(e, { type: 'ping' }); }, 20000); // 保持扩展的 service worker 不休眠
 
   engine.resync().catch(e => log('resync', e));
 
   return {
     engine, handleUi, onForeground, onOffline,
-    status: () => ({ extConnected: !!ext, fg, lastWork }),
+    status: () => ({ extConnected: exts.size > 0, browsers: [...exts.values()].map(e => e.browser), fg, lastWork }),
     close: () => {
       clearInterval(ping); clearTimeout(debounce); timers.forEach(clearTimeout);
       for (const c of wss.clients) c.terminate(); // 断开扩展，让它退回单机模式
